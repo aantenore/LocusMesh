@@ -216,6 +216,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.json:
             print(json.dumps(_error_envelope(command, "INPUT_INVALID", message), sort_keys=True))
         return 2
+    except Exception:
+        message = "unexpected internal failure; no admission granted"
+        print(f"locusmesh: INTERNAL_ERROR: {message}", file=sys.stderr)
+        if args.json:
+            print(json.dumps(_error_envelope(command, "INTERNAL_ERROR", message), sort_keys=True))
+        return 1
 
     if args.json:
         print(json.dumps(_envelope(command, result), sort_keys=True))

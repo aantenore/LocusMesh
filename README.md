@@ -15,7 +15,12 @@ an agent.
 
 ## Status
 
-**Executable alpha vertical slice — `0.1.0a1`.**
+| Property | Status |
+| --- | --- |
+| Version | `0.1.0a1` |
+| Maturity | Experimental executable alpha; not production-ready |
+| Runtime mode | Offline vertical slice over supplied artifacts |
+| License | [Apache-2.0](LICENSE) |
 
 The current release provides:
 
@@ -62,12 +67,15 @@ uv run locusmesh --json schema export --out generated-schemas
 | Exit | Meaning |
 | --- | --- |
 | `0` | Command succeeded or the decision admitted the route. |
+| `1` | Redacted internal failure; no admission was granted. |
 | `2` | Input, schema, file, decoding, or configured-state error. |
 | `3` | Route-plan policy denial. |
 | `4` | Attestation, signature, evidence, time, or replay denial. |
 
 JSON mode emits a stable `locusmesh.cli-output.v1` envelope on stdout.
-Diagnostics use stderr.
+Handled internal failures use `INTERNAL_ERROR`, `ok=false`, and `data=null`
+without exposing exception details. Diagnostics use stderr. A process failure
+outside the CLI boundary yields no valid admission and is also a denial.
 
 ## Scope model
 
@@ -316,4 +324,4 @@ The release contract and mandatory cases are documented in
 
 ## License
 
-Apache License 2.0.
+[Apache License 2.0](LICENSE) (`Apache-2.0`).

@@ -47,8 +47,9 @@ uv run locusmesh --json doctor
 | Fixture topology | JSON | `probe` |
 
 Each input is UTF-8, limited to 1 MiB, rejects duplicate keys, and must match
-its versioned contract. Keep policy and attestation directories read-only for
-the verification process where practical.
+its versioned contract. Commands never modify these files. Mount directories
+containing policies, plans, attestations, and probe topologies read-only where
+practical.
 
 ### Writable outputs
 
@@ -57,6 +58,10 @@ the verification process where practical.
 | JSON Schema directory | `schema export` | Parent or target directory must be writable. |
 | SQLite replay database and side files | `verify --nonce-store` | Parent directory must be writable and access-restricted. |
 | Redirected CLI result | Shell redirection | Destination directory must be writable. |
+
+Keep output paths separate from read-only input directories. The parent of
+`--out` and the parent of `--nonce-store` must be writable by the verification
+process; the input directories do not need write permission.
 
 The replay database is created lazily only after a complete valid attestation
 reaches replay recording. Do not place it in an ephemeral directory when
@@ -85,19 +90,23 @@ Machine-readable mode emits one `locusmesh.cli-output.v1` envelope to stdout:
 On a valid policy denial or attestation denial, `data` contains an
 `AdmissionDecision`, `ok` is false, and `error` remains null. Input failures
 use `error.code = "INPUT_INVALID"`; an unavailable configured replay store
-uses `error.code = "STATE_UNAVAILABLE"`. Both carry `data = null`.
-Diagnostics go to stderr.
+uses `error.code = "STATE_UNAVAILABLE"`. An unexpected exception handled at
+the CLI boundary uses `error.code = "INTERNAL_ERROR"`. All three carry
+`data = null`; internal details are not emitted. Diagnostics go to stderr.
 
 Always check the process exit code and the typed payload:
 
 | Exit | Meaning |
 | --- | --- |
 | `0` | Command succeeded, or an admission/verification decision admitted. |
+| `1` | Redacted internal failure; no admission was granted. |
 | `2` | Invalid arguments, file, encoding, JSON/YAML, contract, or unavailable configured state. |
 | `3` | Route-plan policy denial. |
 | `4` | Attestation or replay denial. |
 
-An unexpected crash produces no valid admission and must be treated as denial.
+A handled internal failure returns a non-admission error envelope. A crash
+outside the CLI boundary produces no valid artifact. Treat either as denial
+and never fall back to a saved admission.
 
 ## 5. Inspect runtime readiness
 

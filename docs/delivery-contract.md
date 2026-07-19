@@ -267,13 +267,22 @@ It is a local persistence adapter, not a distributed replay service.
 | `demo` | None | Device, private, scope-escape, tamper, and replay scenarios. |
 | `schema export --out DIR` | Writable directory | Deterministic Pydantic JSON Schema files. |
 
+Policy, plan, attestation, and probe-topology files are read-only inputs. Their
+directories may be mounted read-only. Schema-export and replay-state paths are
+separate outputs whose parent directories must be writable by the process;
+output paths must not be placed inside a read-only input directory.
+
 `--json` emits `locusmesh.cli-output.v1`. Input failures return exit `2` with
 `INPUT_INVALID`; an unavailable configured replay store also returns exit `2`
 with `STATE_UNAVAILABLE`. Plan denials return `3`, attestation/replay denials
-`4`, and success `0`.
+`4`, redacted internal failures return `1` with `INTERNAL_ERROR`, and success
+returns `0`.
 
-Unexpected uncaught process failures produce no admission artifact and must be
-treated by callers as failure. They must never be converted to success.
+In JSON mode, an internal failure handled by the CLI produces an error envelope
+with `ok=false` and `data=null`, never an `AdmissionDecision`; text mode emits
+only the redacted diagnostic. A process failure outside that boundary produces
+no valid artifact. Callers must treat all of these outcomes as denial and must
+never reuse an earlier admission.
 
 ## 15. Acceptance matrix
 
@@ -308,6 +317,7 @@ treated by callers as failure. They must never be converted to success.
 | A27 | CLI executed without network | All current commands remain functional |
 | A28 | A probed topology contains a peer or edge absent from the selected policy | Probe succeeds descriptively; admission authority remains unchanged and the route denies against the selected policy |
 | A29 | Configured replay store cannot be opened or used | Exit `2` with redacted `STATE_UNAVAILABLE`; no admission artifact |
+| A30 | An unexpected internal exception crosses the command implementation boundary | Exit `1` with redacted `INTERNAL_ERROR`, `ok=false`, and `data=null` |
 
 ## 16. Release gates
 

@@ -86,8 +86,10 @@ The library core is trusted code. It receives a timezone-aware verification
 time explicitly. The CLI supplies the host's current UTC time, so a compromised
 or incorrect host clock can affect validity checks.
 
-An unexpected library or CLI failure must be interpreted as absence of an
-admission, never as permission to continue.
+An unexpected CLI exception handled at the command boundary returns exit `1`;
+JSON mode reports a redacted `INTERNAL_ERROR` with no decision data. A failure
+outside that boundary yields no valid artifact. Both must be interpreted as
+absence of an admission, never as permission to continue.
 
 ### 3.4 Cryptographic boundary
 
@@ -174,7 +176,7 @@ claim is capped to effective `peer_asserted`, and a policy requiring
 | T18 | Raw prompts leak through evidence or diagnostics. | Public contracts contain only an HMAC commitment; validation diagnostics exclude rejected input values. | Request IDs, timing, route shape, and filenames can still be sensitive metadata. |
 | T19 | A guessable request is recovered from its commitment. | `commit_request` uses HMAC-SHA-256 and requires at least 32 key bytes. | Weak, reused, or exposed caller keys defeat this protection. |
 | T20 | A private signing or commitment key is passed to verification. | The verify contract accepts only public keys embedded in policy and a precomputed commitment. | Fixture construction APIs do hold local private keys in process. |
-| T21 | An exception or integration bug fails open. | Domain denials are typed; CLI has distinct nonzero exits; an uncaught failure yields no valid decision. | A caller can ignore the result, reuse a previous admission, or default allow. |
+| T21 | An exception or integration bug fails open. | Domain denials are typed; handled internal exceptions return a redacted non-admission envelope and exit `1`; a failure outside that boundary yields no valid decision. | A caller can ignore the result, reuse a previous admission, or default allow. |
 | T22 | A saved decision is edited and reused. | Decisions are outputs, not verifier inputs; consumers can re-run verification from policy and attestation. | There is no signed decision/report envelope in `0.1`. |
 | T23 | Public-mesh admission is interpreted as confidentiality. | Scope and evidence fields make no confidentiality claim; docs declare the limitation. | External applications may overstate semantics. |
 | T24 | Peer signature is treated as proof of correct compute. | Evidence language is limited to assertion provenance; no output or correctness field exists. | Correctness remains entirely outside this release. |

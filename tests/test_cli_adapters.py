@@ -7,12 +7,12 @@ from typing import cast
 import pytest
 import yaml
 
-from conftest import NOW
+from conftest import MODEL_DIGEST, NOW, RUNTIME_DIGEST, deterministic_signer, make_plan
 from locusmesh import cli
 from locusmesh.adapters.fixture import FixtureTopologyProvider
 from locusmesh.adapters.local_signer import LocalEd25519Signer
 from locusmesh.attestation import build_attestation
-from locusmesh.models import RoutePlan
+from locusmesh.models import EvidenceLevel, ExecutionIntent, PeerManifest, RoutePlan, TopologyEdge
 from locusmesh.policy import AdmissionPolicy
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -32,6 +32,79 @@ def test_fixture_provider_and_cli_probe(capsys: pytest.CaptureFixture[str]) -> N
     assert exit_code == 0
     assert result["ok"] is True
     assert result["data"]["peer_count"] == 2  # type: ignore[index]
+
+
+def test_probed_topology_cannot_expand_selected_policy_authority(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    policy: AdmissionPolicy,
+) -> None:
+    observed_signer = deterministic_signer("cli-observed-only-peer")
+    observed_peer = PeerManifest(
+        peer_id="observed-only",
+        execution_scope=ExecutionIntent.PRIVATE_MESH,
+        model_digest=MODEL_DIGEST,
+        runtime_digest=RUNTIME_DIGEST,
+        evidence_level=EvidenceLevel.PEER_ASSERTED,
+        key_id=observed_signer.key_id,
+        public_key=observed_signer.public_key,
+        valid_from=NOW.replace(hour=10),
+        expires_at=NOW.replace(hour=14),
+    )
+    observed_topology = policy.topology.model_copy(
+        update={
+            "snapshot_id": "untrusted-observed-topology",
+            "peers": (*policy.topology.peers, observed_peer),
+            "edges": (
+                *policy.topology.edges,
+                TopologyEdge(
+                    source_peer_id="device-local",
+                    target_peer_id="observed-only",
+                ),
+            ),
+        }
+    )
+    plan = make_plan(
+        intent=ExecutionIntent.PRIVATE_MESH,
+        hops=("device-local", "observed-only"),
+        request_id="observed-topology-request",
+        nonce="observed-topology-0001",
+    )
+    topology_path = tmp_path / "observed-topology.json"
+    policy_path = tmp_path / "selected-policy.yaml"
+    plan_path = tmp_path / "observed-route-plan.json"
+    topology_path.write_text(observed_topology.model_dump_json(indent=2), encoding="utf-8")
+    policy_path.write_text(
+        yaml.safe_dump(policy.model_dump(mode="json"), sort_keys=True),
+        encoding="utf-8",
+    )
+    plan_path.write_text(plan.model_dump_json(indent=2), encoding="utf-8")
+    monkeypatch.setattr(cli, "_now", lambda: NOW)
+
+    assert cli.main(["--json", "probe", "--topology", str(topology_path)]) == 0
+    probe = _json_stdout(capsys)
+    assert probe["data"]["peer_count"] == len(policy.topology.peers) + 1  # type: ignore[index]
+
+    assert (
+        cli.main(
+            [
+                "--json",
+                "admit",
+                "--policy",
+                str(policy_path),
+                "--plan",
+                str(plan_path),
+            ]
+        )
+        == 3
+    )
+    decision = _json_stdout(capsys)
+    assert decision["ok"] is False
+    assert "PEER_UNKNOWN:observed-only" in decision["data"]["reason_codes"]  # type: ignore[index]
+    assert (
+        "EDGE_NOT_ALLOWED:device-local->observed-only" in decision["data"]["reason_codes"]  # type: ignore[index]
+    )
 
 
 def test_cli_doctor_demo_admit_and_schema_export(
@@ -186,5 +259,34 @@ def test_validation_errors_do_not_echo_rejected_secret_values(
     )
     captured = capsys.readouterr()
     assert exit_code == 2
+    assert secret not in captured.out
+    assert secret not in captured.err
+
+
+def test_unexpected_internal_errors_are_redacted_and_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    secret = "sensitive-internal-detail"
+
+    def fail(_args: object) -> object:
+        raise RuntimeError(secret)
+
+    monkeypatch.setattr(cli, "_run", fail)
+
+    exit_code = cli.main(["--json", "doctor"])
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+    assert exit_code == 1
+    assert result == {
+        "schema_version": "locusmesh.cli-output.v1",
+        "command": "doctor",
+        "ok": False,
+        "data": None,
+        "error": {
+            "code": "INTERNAL_ERROR",
+            "message": "unexpected internal failure; no admission granted",
+        },
+    }
     assert secret not in captured.out
     assert secret not in captured.err

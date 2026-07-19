@@ -32,3 +32,5 @@ All notable changes to LocusMesh are documented here.
   the patched 48.x line.
 - Replay-store failures return a redacted, machine-readable failure instead of
   leaking an implementation traceback.
+- Unexpected CLI exceptions return a redacted `INTERNAL_ERROR` and never carry
+  admission data.
