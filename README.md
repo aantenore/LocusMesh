@@ -1,5 +1,39 @@
 # LocusMesh
 
+**Check where distributed AI work is allowed to run before trusting the route.**
+
+## In plain English
+
+- **Problem:** an AI endpoint can listen on the same computer while forwarding
+  work to another machine. An address such as `127.0.0.1` therefore does not, by
+  itself, prove that data or inference stayed on the device.
+- **What it does:** LocusMesh checks a route against an operator-approved map of
+  peers and verifies one signed receipt for every hop. A route is denied when its
+  scope, peer, key, model, runtime, time window, or evidence does not match.
+- **Who it is for:** developers and operators who need a small, inspectable trust
+  boundary around local, private-mesh, or public-mesh inference routes.
+- **Concrete example:** the offline demo allows a one-device route and an
+  approved private-peer route. It rejects a supposedly device-only route whose
+  peer is classified as public even though that peer advertises a loopback
+  address; it also rejects a changed signature and a repeated nonce.
+
+| Feature | Real-world benefit |
+| --- | --- |
+| Explicit `device_only`, `private_mesh`, and `public_mesh` scopes | A user or operator can set the maximum boundary a request may cross. |
+| Operator-pinned peer, edge, key, model, and runtime data | A provider observation cannot quietly grant itself permission to join a trusted route. |
+| One signed receipt per exact hop | Missing, reordered, or altered supplied route evidence is denied. |
+| Time, hop-count, digest, and evidence-level checks | Stale or structurally inconsistent routes fail closed instead of being accepted on best effort. |
+| Optional SQLite replay protection | A previously accepted nonce cannot be silently reused in the same protected store. |
+| Stable offline CLI and Python API | Teams can add the same route-admission check to scripts, tests, and applications without a hosted dependency. |
+
+> **Maturity and limits:** LocusMesh is an experimental offline alpha, not a
+> live mesh, model router, or inference service. It validates supplied artifacts
+> and signatures; it does not prove that a peer performed the claimed
+> computation or kept content confidential. Hardware-attested evidence is
+> reserved vocabulary and is not implemented in this release.
+
+## Technical overview
+
 LocusMesh is a local-first, fail-closed Python library and CLI for evaluating
 distributed-inference execution scopes and verifying signed route evidence.
 
