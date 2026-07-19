@@ -31,8 +31,9 @@ evidence boundary** for distributed inference:
 - honest `observed`, `peer_asserted`, and `hardware_attested` semantics;
 - content-free, deterministic decision lineage.
 
-LocusMesh `0.1.0a1` implements only the offline CLI/API vertical slice. It does
-not claim fresh runtime enforcement.
+LocusMesh `0.2.0a1` adds a bounded, read-only Mesh-LLM status observer to the
+offline CLI/API trust core. The observation cannot grant admission and the
+project does not claim fresh runtime enforcement.
 
 ## Method
 
@@ -119,9 +120,27 @@ the first hop.
 execution boundary and evidence about the exact declared route. Provider
 status cannot safely choose its own trust roots and approve itself.
 
-**Decision:** a distributed-inference system is a future observation/execution
-adapter, not a dependency or authority. The current fixture adapter must not be
-described as enabling live mesh admission.
+**Decision:** a distributed-inference system is an observation/execution
+adapter, not a dependency or authority. `0.2` implements only the read-only
+observation half: a short-lived, loopback status projection that is a different
+contract from operator topology and cannot enable live mesh admission.
+
+### llm-d and LMCache
+
+[llm-d](https://llm-d.ai/) is a composable inference-serving stack whose router
+separates endpoint discovery, scoring, and the data-plane proxy. It supports
+prefix-cache-aware routing, disaggregated prefill/decode, flow control, and
+heterogeneous accelerators. [LMCache](https://docs.lmcache.ai/developer_guide/architecture.html)
+is a vendor-neutral KV-cache layer spanning GPU, CPU, local, and remote storage
+and transport modes.
+
+**Direction:** distributed inference is decomposing into reusable discovery,
+routing, execution, and cache layers rather than converging on one application
+control plane.
+
+**Decision:** do not reproduce endpoint scoring, scheduling, serving, or cache
+movement in LocusMesh. Future adapters may observe those fabrics, but admission
+continues to require independent policy and request-bound evidence.
 
 ### PlanetServe
 
@@ -243,7 +262,7 @@ the verifier.
 **Direction:** interoperable evidence should prefer precise existing
 specifications over vaguely compatible proprietary claims.
 
-**Current decision:** `0.1.0a1` does **not** implement these standards. It uses
+**Current decision:** `0.2.0a1` does **not** implement these standards. It uses
 direct Ed25519 signatures over a compact sorted-key JSON Pydantic payload.
 in-toto/DSSE and RFC 8785 are candidates for a separately versioned future
 profile only after conformance vectors and migration semantics exist.
@@ -268,7 +287,7 @@ profile only after conformance vectors and migration semantics exist.
 
 LocusMesh is:
 
-- a local-first offline Python library and CLI;
+- a local-first Python library and CLI with an offline trust core;
 - policy- and schema-first;
 - provider-neutral;
 - content-free;
@@ -279,7 +298,7 @@ LocusMesh is not:
 
 - an inference server;
 - a model or task router;
-- a live proxy in `0.1`;
+- a live proxy in `0.2`;
 - an agent runtime;
 - a context engine;
 - an intent normalizer;
@@ -315,7 +334,9 @@ The reviewed sources did not expose the same narrow combination of:
 4. bindings across request commitment, route, policy, topology, model,
    runtime, adjacency, and previous receipt;
 5. claimed-versus-effective evidence semantics;
-6. a deterministic, provider-neutral offline decision.
+6. a deterministic, provider-neutral offline decision;
+7. a typed, non-authoritative live fabric observation that cannot auto-enroll
+   provider status.
 
 This is a positioning hypothesis, not proof of worldwide novelty. It must be
 rechecked before a public novelty, patent, or security claim.
@@ -327,7 +348,7 @@ The scan supports this sequence:
 1. harden and publish the offline contract with negative vectors;
 2. validate portability with a second-language verifier or formal conformance
    fixtures;
-3. design a read-only provider observation adapter that cannot grant authority;
+3. validate the read-only Mesh-LLM observer against a real multi-node lab;
 4. specify fresh route reservation before any live enforcement claim;
 5. integrate established identity/revocation systems through ports;
 6. evaluate a standard attestation profile separately;
@@ -343,7 +364,8 @@ optimization, or secret management into the core.
 - Producer security and performance claims were not independently reproduced.
 - Absence of an exact equivalent in reviewed sources does not prove that none
   exists.
-- Live feasibility is unproven until a real adapter and multi-node test exist.
+- Candidate observation is proven against the supported HTTP projection; live
+  route feasibility remains unproven until a multi-node request-bound test exists.
 - The current market conclusion should be refreshed before major investment or
   public differentiation claims.
 
@@ -356,6 +378,8 @@ optimization, or secret management into the core.
 - [RouteLLM](https://github.com/lm-sys/RouteLLM)
 - [vLLM Semantic Router](https://github.com/vllm-project/semantic-router)
 - [Mesh-LLM](https://github.com/Mesh-LLM/mesh-llm)
+- [llm-d](https://llm-d.ai/)
+- [LMCache architecture](https://docs.lmcache.ai/developer_guide/architecture.html)
 - [PlanetServe](https://www.usenix.org/conference/nsdi26/presentation/fang)
 - [Gemma coder GGUF model card](https://huggingface.co/yuxinlu1/gemma-4-12B-coder-fable5-composer2.5-v1-GGUF)
 - [ktx](https://github.com/Kaelio/ktx-ai-data-agents-mcp-context-skills)

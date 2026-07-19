@@ -1,9 +1,9 @@
-# LocusMesh `0.1` threat model
+# LocusMesh `0.2` threat model
 
 ## 1. Scope and security objective
 
-LocusMesh protects the integrity of an **offline** route-admission and
-route-attestation decision.
+LocusMesh protects the separation between an untrusted live fabric observation
+and an **offline** route-admission or route-attestation decision.
 
 For caller-selected inputs it checks that:
 
@@ -16,6 +16,11 @@ For caller-selected inputs it checks that:
 - an optional replay store has not accepted the nonce before;
 - the returned decision reports only the evidence level the verifier can
   support.
+
+For a configured loopback Mesh-LLM management endpoint it also guarantees that
+the selected status projection is bounded, short-lived, excludes the provider
+invite token, is never classified as `device_only`, and carries no admission
+authority.
 
 The verifier does not prove that inference occurred, that a declared route was
 the real runtime route, that no hidden peer participated, that output is
@@ -33,21 +38,27 @@ correct, or that content was confidential.
 | Evidence semantics | `hardware_attested` is not effective without an implemented hardware verifier. |
 | Replay record | Invalid evidence is never persisted as consumed; a persisted nonce is accepted at most once. |
 | Content boundary | Prompt, completion, HMAC key, private signing key, credentials, and tokens remain outside public contracts. |
+| Observation boundary | Provider status cannot become a topology, policy, key, edge, model/runtime digest, or admission decision. |
 
 ## 3. Trust boundaries
 
 ```mermaid
 flowchart LR
     O["Operator boundary<br/>selected policy and deployment permissions"]
+    M["Untrusted Mesh-LLM status<br/>loopback first hop only"]
+    B["Bounded read-only observer"]
+    F["FabricObservation<br/>authority=false"]
     U["Untrusted files<br/>plan, attestation, probe topology"]
     I["Bounded JSON/YAML and fixture adapters"]
     C["Admission and verification core"]
     K["Cryptography library"]
     S["Optional SQLite replay state"]
     R["Decision consumer"]
-    X["Inference runtime<br/>not observed by v0.1"]
+    X["Inference runtime and real route<br/>not proven by v0.2"]
 
     O --> C
+    M --> B --> F
+    F -. "cannot enroll" .-> O
     U --> I --> C
     C <--> K
     C <--> S
@@ -70,7 +81,25 @@ belong to the deployment.
 The topology `probe` command is descriptive only. Its output is not an
 authority source and is not automatically merged into a policy.
 
-### 3.2 Untrusted artifacts and parsers
+### 3.2 Live provider observation
+
+`MeshLlmStatusObserver` accepts only an HTTP(S) loopback origin, appends the
+fixed `/api/status` path, denies redirects, limits the response to 1 MiB,
+requires strict UTF-8 JSON without duplicate keys, and projects only selected
+status fields. It never sends a prompt, reservation, credential, or invite
+token.
+
+The response remains controlled by the Mesh-LLM process. Its node IDs, models,
+owner-verification flags, publication state, and discovery state are provider
+claims. LocusMesh compares a conservative scope signal with the operator's
+requested maximum, but a matching signal is not admission. The provider status
+contract is explicitly labeled unversioned and the observation expires after a
+short bounded interval.
+
+Loopback proves only the observer's first HTTP hop. It does not prove which
+peer will execute a future request or whether hidden forwarding occurs.
+
+### 3.3 Untrusted artifacts and parsers
 
 Route plans, attestations, receipt fields, address hints, and fixture topology
 files are attacker-controlled until validated. CLI inputs are limited to
@@ -80,7 +109,7 @@ string fields.
 
 The parser and its dependencies remain part of the trusted computing base.
 
-### 3.3 Core and time
+### 3.4 Core and time
 
 The library core is trusted code. It receives a timezone-aware verification
 time explicitly. The CLI supplies the host's current UTC time, so a compromised
@@ -91,21 +120,21 @@ JSON mode reports a redacted `INTERNAL_ERROR` with no decision data. A failure
 outside that boundary yields no valid artifact. Both must be interpreted as
 absence of an admission, never as permission to continue.
 
-### 3.4 Cryptographic boundary
+### 3.5 Cryptographic boundary
 
 LocusMesh relies on the `cryptography` implementation of Ed25519 and on
 standard-library SHA-256/HMAC-SHA-256. It signs compact sorted-key UTF-8 JSON
 directly. This profile is deterministic for the supported contracts but is not
 claimed to implement RFC 8785, DSSE, or in-toto.
 
-### 3.5 Replay-state boundary
+### 3.6 Replay-state boundary
 
 Without a `ReplayStore`, verification is stateless and cannot detect reuse
 across invocations. With the SQLite adapter, nonce insertion is atomic and
 happens only after the attestation fully verifies. The database path,
 availability, backup, permissions, and lifecycle are deployment concerns.
 
-### 3.6 Decision consumer
+### 3.7 Decision consumer
 
 The consumer must check both the process exit code and the typed decision. It
 must not treat a probe result, a saved decision, or a signed assertion as fresh
@@ -114,6 +143,7 @@ runtime authorization.
 ## 4. Adversaries
 
 - an unknown mesh participant;
+- a malicious or compromised local process serving `/api/status`;
 - an allowed but compromised or dishonest peer;
 - a process able to alter plan, attestation, topology, or policy files;
 - a process replaying a previously valid attestation;
@@ -123,16 +153,17 @@ runtime authorization.
 - a process able to corrupt or remove replay state;
 - a compromised host, administrator, package dependency, or system clock.
 
-The last class can undermine the offline trust base and is not fully mitigated
+The last class can undermine the trust base and is not fully mitigated
 by this release.
 
 ## 5. Evidence interpretation
 
 ### `observed`
 
-The claim is present, but the evidence level does not assert independent
-runtime or hardware proof. Receipts are still signature-checked because all
-`0.1` hop receipts use the same authenticated wire contract.
+For a fabric candidate this is an unauthenticated provider status claim and
+never enters admission. For a hop receipt, the claim is present but the
+evidence level does not assert independent runtime or hardware proof; receipts
+are still signature-checked.
 
 ### `peer_asserted`
 
@@ -148,7 +179,7 @@ and key provenance for the statement. It does not prove:
 
 ### `hardware_attested`
 
-The name is reserved for a future independent verifier. In `0.1` a hardware
+The name is reserved for a future independent verifier. In `0.2` a hardware
 claim is capped to effective `peer_asserted`, and a policy requiring
 `hardware_attested` is denied as unsupported.
 
@@ -177,11 +208,17 @@ claim is capped to effective `peer_asserted`, and a policy requiring
 | T19 | A guessable request is recovered from its commitment. | `commit_request` uses HMAC-SHA-256 and requires at least 32 key bytes. | Weak, reused, or exposed caller keys defeat this protection. |
 | T20 | A private signing or commitment key is passed to verification. | The verify contract accepts only public keys embedded in policy and a precomputed commitment. | Fixture construction APIs do hold local private keys in process. |
 | T21 | An exception or integration bug fails open. | Domain denials are typed; handled internal exceptions return a redacted non-admission envelope and exit `1`; a failure outside that boundary yields no valid decision. | A caller can ignore the result, reuse a previous admission, or default allow. |
-| T22 | A saved decision is edited and reused. | Decisions are outputs, not verifier inputs; consumers can re-run verification from policy and attestation. | There is no signed decision/report envelope in `0.1`. |
+| T22 | A saved decision is edited and reused. | Decisions are outputs, not verifier inputs; consumers can re-run verification from policy and attestation. | There is no signed decision/report envelope in `0.2`. |
 | T23 | Public-mesh admission is interpreted as confidentiality. | Scope and evidence fields make no confidentiality claim; docs declare the limitation. | External applications may overstate semantics. |
 | T24 | Peer signature is treated as proof of correct compute. | Evidence language is limited to assertion provenance; no output or correctness field exists. | Correctness remains entirely outside this release. |
 | T25 | Topology probe output silently expands authority. | `probe` only summarizes a file; `admit` and `verify` use the topology already embedded in the selected policy. | An operator can manually create an unsafe policy from observations. |
 | T26 | Replay database is exposed or corrupted. | SQLite uses parameterized queries and a single nonce primary key. | Filesystem permissions, denial of service, rollback, and recovery are external controls. |
+| T27 | Loopback Mesh-LLM status is treated as proof of device-local execution. | Every Mesh observation is at least `private_mesh`; observation types carry no admission authority. | A consumer can ignore the contract semantics. |
+| T28 | Provider status silently enrolls peers or keys. | `FabricObservation` is structurally distinct from `TopologySnapshot` and contains no public keys, edges, model/runtime digests, or policy conversion. | An operator can manually create an unsafe policy from the observation. |
+| T29 | Observer becomes an SSRF or redirect probe. | Only credential-free HTTP(S) loopback origins are accepted; path is fixed and redirects are denied. | A malicious loopback service can still receive the GET request. |
+| T30 | Status response exhausts parser resources or exploits ambiguity. | Body, candidates, models, and strings are bounded; duplicate JSON keys and unknown states fail closed. | JSON parser and HTTP stack remain in the trusted computing base. |
+| T31 | Provider token or unrelated sensitive status leaks into output. | Projection allowlists fields; invite token and raw body are neither emitted nor included in the projection digest. | Selected node IDs, models, state, endpoint, and timing remain metadata. |
+| T32 | A stale observation is reused for a later request. | Observations have a 1–60 second lifetime and default to five seconds; they cannot authorize requests. | Consumers can display stale data or ignore expiry. |
 
 ## 7. Security invariants
 
@@ -199,7 +236,11 @@ The following invariants are release gates:
 9. Invalid attestations never create replay state.
 10. A repeated persisted nonce returns `REPLAY_DETECTED`.
 11. An error or absent decision never implies admission.
-12. No network or inference runtime is needed by the test suite or CLI demo.
+12. Offline admission, verification, fixture, schema, and demo paths require no network.
+13. Provider observations always carry `admission_authority=false`.
+14. Mesh provider observations are never classified as `device_only`.
+15. Observation output and its digest exclude provider invite tokens.
+16. An observation cannot validate as an operator topology contract.
 
 The executable cases are listed in
 [the delivery contract](delivery-contract.md).
@@ -214,16 +255,18 @@ The executable cases are listed in
 - Protect the system clock or supply a trusted explicit time through the
   library API.
 - Treat missing, malformed, timed-out, or crashing verification as denial.
+- Treat missing, malformed, timed-out, scope-incompatible, or expired provider
+  observation as absence of an eligible candidate, never as fallback authority.
 - Do not log raw requests, commitment keys, private keys, or credentials.
 - Pin and scan dependencies and preserve the offline test mode.
-- Re-evaluate this threat model before adding any live provider, proxy, remote
-  signer, IAM, TEE, or proof system.
+- Re-evaluate this threat model before adding provider invocation, route
+  reservation, policy enrollment, a remote signer, IAM, TEE, or proof system.
 
 ## 9. Out-of-scope controls
 
 The following are intentionally absent:
 
-- live topology discovery or freshness proof;
+- authoritative live topology discovery or route freshness proof;
 - route reservation and pre-invocation authorization;
 - network transport security;
 - online key revocation or policy distribution;

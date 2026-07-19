@@ -78,5 +78,6 @@ jobs:
       - run: uv build --no-build-isolation
       - run: uv venv --python 3.12 /tmp/locusmesh-smoke
       - run: uv pip install --python /tmp/locusmesh-smoke/bin/python dist/*.whl
+      - run: uv run python scripts/smoke_installed_observer.py /tmp/locusmesh-smoke/bin/locusmesh
       - run: cd /tmp && /tmp/locusmesh-smoke/bin/locusmesh --json doctor
       - run: cd /tmp && /tmp/locusmesh-smoke/bin/locusmesh --json demo

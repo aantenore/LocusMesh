@@ -4,6 +4,8 @@ from locusmesh.models import (
     AdmissionDecision,
     EvidenceLevel,
     ExecutionIntent,
+    FabricCandidateObservation,
+    FabricObservation,
     HopReceipt,
     PeerManifest,
     RouteAttestation,
@@ -16,6 +18,8 @@ __all__ = [
     "AdmissionDecision",
     "EvidenceLevel",
     "ExecutionIntent",
+    "FabricCandidateObservation",
+    "FabricObservation",
     "HopReceipt",
     "PeerManifest",
     "RouteAttestation",
@@ -24,4 +28,4 @@ __all__ = [
     "TopologySnapshot",
 ]
 
-__version__ = "0.1.0a1"
+__version__ = "0.2.0a1"

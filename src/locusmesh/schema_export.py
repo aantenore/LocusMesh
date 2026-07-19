@@ -12,6 +12,8 @@ from locusmesh.models import (
     AdmissionDecision,
     EvidenceLevel,
     ExecutionIntent,
+    FabricCandidateObservation,
+    FabricObservation,
     HopReceipt,
     PeerManifest,
     RouteAttestation,
@@ -24,6 +26,8 @@ from locusmesh.policy import AdmissionPolicy
 _SCHEMAS: dict[str, Any] = {
     "execution-intent": ExecutionIntent,
     "evidence-level": EvidenceLevel,
+    "fabric-candidate-observation": FabricCandidateObservation,
+    "fabric-observation": FabricObservation,
     "peer-manifest": PeerManifest,
     "topology-edge": TopologyEdge,
     "topology-snapshot": TopologySnapshot,

@@ -1,17 +1,19 @@
-# LocusMesh 0.1 Delivery Contract
+# LocusMesh 0.2 Delivery Contract
 
 ## 1. Purpose
 
-This contract defines the executable `0.1.0a1` vertical slice and its release
+This contract defines the executable `0.2.0a1` vertical slice and its release
 gates.
 
-LocusMesh evaluates an operator-pinned route plan and verifies direct
-Ed25519-signed hop receipts entirely offline. It does not execute or proxy
-inference.
+LocusMesh observes bounded candidate status from a loopback Mesh-LLM management
+endpoint, evaluates an independently operator-pinned route plan, and verifies
+direct Ed25519-signed hop receipts. It does not execute or proxy inference.
 
 ## 2. Product claim
 
-For supplied policy, topology, route, time, and receipt artifacts, LocusMesh:
+For a configured Mesh-LLM endpoint, LocusMesh emits short-lived candidate and
+scope signals that explicitly carry no admission authority. For supplied
+policy, topology, route, time, and receipt artifacts, it then:
 
 - applies an explicit `device_only`, `private_mesh`, or `public_mesh` boundary;
 - fails closed on unknown, stale, widened, inconsistent, or unsupported input;
@@ -34,7 +36,8 @@ compute, runtime integrity, physical locality, or confidentiality.
 | Fixture adapter | Bounded local topology JSON with duplicate-key rejection. |
 | Local signer | In-memory Ed25519 for fixtures and embedding. |
 | Replay adapter | Optional lazy SQLite nonce store. |
-| CLI | Offline commands, JSON envelope v1, stable exit mapping. |
+| Mesh-LLM observer | Loopback-only, bounded, redirect-denying status projection with no enrollment or invocation. |
+| CLI | Offline admission plus explicit live observation, JSON envelope v1, stable exit mapping. |
 | Schema exporter | Deterministic Pydantic JSON Schema files. |
 
 ## 4. Explicit boundary
@@ -42,6 +45,9 @@ compute, runtime integrity, physical locality, or confidentiality.
 ### Included
 
 - `ExecutionIntent` and `EvidenceLevel` contracts;
+- `FabricObservation` and `FabricCandidateObservation` contracts with
+  `admission_authority=false`;
+- read-only Mesh-LLM `/api/status` projection from an HTTP(S) loopback origin;
 - policy-pinned topology, peer manifests, keys, model/runtime digests, and
   evidence floors;
 - strict JSON and safe YAML parsing up to one MiB per input;
@@ -56,15 +62,15 @@ compute, runtime integrity, physical locality, or confidentiality.
 ### Excluded
 
 - OpenAI-compatible proxy;
-- real Mesh-LLM or other provider adapter;
-- live topology discovery, preflight, reservation, or invocation;
+- Mesh-LLM inference, route reservation, policy enrollment, or receipt adapter;
+- authoritative live topology discovery or pre-invocation admission;
 - IAM, token exchange, secret management, or online revocation;
 - TEE and hardware-attestation verification;
 - proof of correct compute;
 - confidentiality enforcement;
 - provider routing or model capability selection.
 
-DSSE, in-toto, and RFC 8785 are not used by `0.1.0a1`. They are future
+DSSE, in-toto, and RFC 8785 are not used by `0.2.0a1`. They are future
 interoperability candidates only.
 
 ## 5. Operator authority
@@ -80,9 +86,10 @@ interoperability candidates only.
 - peer manifests with scope class, model/runtime digests, evidence level,
   key identifier, raw Ed25519 public key, and validity interval.
 
-Provider status is not independently trusted. The operator must review and pin
-the policy file. A receipt cannot add a peer, key, edge, scope permission, or
-evidence floor.
+Provider status is not independently trusted. `FabricObservation` is a
+different contract from `TopologySnapshot` and cannot be passed to admission.
+The operator must establish and pin the policy separately. An observation or
+receipt cannot add a peer, key, edge, scope permission, or evidence floor.
 
 ## 6. Contracts and bounds
 
@@ -103,6 +110,28 @@ evidence floor.
 - exactly one `local_peer_id` referencing a listed peer;
 - timezone-aware ordered capture and expiry;
 - topology digest sorts peers and edges independently of input order.
+
+### `FabricCandidateObservation`
+
+- identifies one provider-reported local node or peer and its serving models;
+- carries the conservative fabric-level scope signal and only `observed`
+  evidence;
+- records provider-claimed owner verification as a claim, not a trust root;
+- always carries `admission_authority=false` plus reasons for missing request,
+  policy, and authoritative-route bindings.
+
+### `FabricObservation`
+
+- contains 1–256 unique candidates and a projection digest that excludes the
+  provider invite token and unselected fields;
+- records provider version while labeling `/api/status` as an unversioned
+  provider contract;
+- expires after a configured 1–60 second lifetime, five seconds by default;
+- compares conservative observed scope with explicit `requested_max_scope`;
+- never reports Mesh transport as `device_only`;
+- always carries `admission_authority=false` and `OBSERVATION_ONLY`.
+- explains classification as `PRIVATE_LAN_STATUS_SIGNAL` or
+  `PUBLIC_OR_AMBIGUOUS_STATUS_SIGNAL`.
 
 ### `RoutePlan`
 
@@ -260,8 +289,9 @@ It is a local persistence adapter, not a distributed replay service.
 
 | Command | Input | Success output |
 | --- | --- | --- |
-| `doctor` | None | Runtime version, Python/dependencies, offline/secret status. |
+| `doctor` | None | Runtime version, dependencies, offline admission/live observation split, and secret status. |
 | `probe --topology FILE` | Strict bounded topology JSON | Counts, validity, digest, and content-free peer summary. |
+| `observe mesh-llm --management-url URL --max-scope SCOPE` | Loopback Mesh-LLM status | `FabricObservation`; never an admission. |
 | `admit --policy FILE --plan FILE` | Policy YAML and route-plan JSON | `AdmissionDecision`. |
 | `verify --policy FILE --attestation FILE [--nonce-store FILE]` | Policy YAML and attestation JSON | `AdmissionDecision`. |
 | `demo` | None | Device, private, scope-escape, tamper, and replay scenarios. |
@@ -275,8 +305,10 @@ output paths must not be placed inside a read-only input directory.
 `--json` emits `locusmesh.cli-output.v1`. Input failures return exit `2` with
 `INPUT_INVALID`; an unavailable configured replay store also returns exit `2`
 with `STATE_UNAVAILABLE`. Plan denials return `3`, attestation/replay denials
-`4`, redacted internal failures return `1` with `INTERNAL_ERROR`, and success
-returns `0`.
+`4`, a provider scope signal above `--max-scope` returns `5`, redacted internal
+failures return `1` with `INTERNAL_ERROR`, and success returns `0`. Provider
+transport or projection failure returns exit `2` with redacted
+`OBSERVATION_UNAVAILABLE` and no observation data.
 
 In JSON mode, an internal failure handled by the CLI produces an error envelope
 with `ok=false` and `data=null`, never an `AdmissionDecision`; text mode emits
@@ -314,10 +346,20 @@ never reuse an earlier admission.
 | A24 | Same semantic policy/topology ordering | Same policy/topology digest |
 | A25 | Admission decision claims success without complete lineage | Pydantic validation rejects it |
 | A26 | Schema export repeated to separate directories | Byte-identical schema files |
-| A27 | CLI executed without network | All current commands remain functional |
+| A27 | CLI executed without network | Offline admission, verification, fixture, demo, and schema commands remain functional |
 | A28 | A probed topology injects a peer, edge, scope class, or key absent from or different to the selected policy | Probe remains descriptive; admission and verification ignore probe output, preserve policy authority, and deny any route not admitted by that policy |
 | A29 | Configured replay store cannot be opened or used | Exit `2` with redacted `STATE_UNAVAILABLE`; no admission artifact |
 | A30 | An unexpected internal exception crosses the command implementation boundary | Exit `1` with redacted `INTERNAL_ERROR`, `ok=false`, and `data=null` |
+| A31 | Private LAN status observed under `private_mesh` maximum | Observation succeeds with `observed_scope=private_mesh` and `admission_authority=false` |
+| A32 | Public/discovery status observed under `private_mesh` maximum | Exit `5`, retain observation with `SCOPE_SIGNAL_EXCEEDS_MAXIMUM`, grant no admission |
+| A33 | Any Mesh status observed under `device_only` maximum | Exit `5`; Mesh transport is never classified as device-only |
+| A34 | Non-loopback management URL, embedded credential, query, fragment, or path | Exit `2` before network access |
+| A35 | Redirect, unavailable endpoint, malformed/duplicate JSON, unknown node state, or response over one MiB | Exit `2` with redacted `OBSERVATION_UNAVAILABLE` and no data |
+| A36 | Provider invite token changes | Secret is absent from output and does not change projection digest |
+| A37 | Observation is parsed as `TopologySnapshot` | Contract validation rejects it |
+| A38 | Duplicate peer IDs or model IDs | Observation rejects the provider payload |
+| A39 | Observation lifetime is missing, naive, zero, or above the configured bound | Construction/configuration rejects it |
+| A40 | Real loopback HTTP fixture serves supported Mesh-LLM status | CLI acquires and projects the status without invoking inference |
 
 ## 16. Release gates
 
@@ -342,5 +384,6 @@ Tests must cover positive routes, every fail-closed boundary in the acceptance
 matrix, strict input parsing, deterministic digests/schema export, CLI exit
 codes/envelopes, tamper, and replay.
 
-Passing these gates establishes conformance only to this offline vertical
-slice.
+Passing these gates establishes only bounded candidate observation plus offline
+artifact admission and verification. It does not establish live route
+authority or correct inference.

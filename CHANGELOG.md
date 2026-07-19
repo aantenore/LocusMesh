@@ -2,6 +2,28 @@
 
 All notable changes to LocusMesh are documented here.
 
+## 0.2.0-alpha.1
+
+### Added
+
+- A loopback-only, read-only Mesh-LLM `/api/status` observer with bounded
+  response size, strict JSON, redirect denial, short observation lifetime, and
+  explicit `private_mesh` / `public_mesh` scope comparison.
+- Versioned `FabricObservation` and `FabricCandidateObservation` contracts.
+  Both carry `admission_authority=false`; neither is a topology or policy
+  enrollment artifact.
+- CLI command `observe mesh-llm` and exit `5` when the provider scope signal
+  exceeds the requested maximum.
+
+### Trust boundary
+
+- A Mesh transport is never inferred as `device_only`, even when its management
+  endpoint uses loopback.
+- Provider tokens and unselected status fields are excluded from the projection
+  and its digest.
+- The observer does not invoke inference, mutate policy, reserve a route, verify
+  a peer key, or supply request-bound evidence.
+
 ## 0.1.0-alpha.1
 
 ### Added
