@@ -315,7 +315,7 @@ never reuse an earlier admission.
 | A25 | Admission decision claims success without complete lineage | Pydantic validation rejects it |
 | A26 | Schema export repeated to separate directories | Byte-identical schema files |
 | A27 | CLI executed without network | All current commands remain functional |
-| A28 | A probed topology contains a peer or edge absent from the selected policy | Probe succeeds descriptively; admission authority remains unchanged and the route denies against the selected policy |
+| A28 | A probed topology injects a peer, edge, scope class, or key absent from or different to the selected policy | Probe remains descriptive; admission and verification ignore probe output, preserve policy authority, and deny any route not admitted by that policy |
 | A29 | Configured replay store cannot be opened or used | Exit `2` with redacted `STATE_UNAVAILABLE`; no admission artifact |
 | A30 | An unexpected internal exception crosses the command implementation boundary | Exit `1` with redacted `INTERNAL_ERROR`, `ok=false`, and `data=null` |
 
