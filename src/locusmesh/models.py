@@ -24,6 +24,10 @@ Nonce = Annotated[
     StringConstraints(min_length=16, max_length=128, pattern=r"^[A-Za-z0-9._~-]+$"),
 ]
 KeyId = Annotated[str, StringConstraints(pattern=r"^ed25519:sha256:[0-9a-f]{64}$")]
+ProviderId = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]{0,63}$")]
+ModelId = Annotated[str, StringConstraints(min_length=1, max_length=512)]
+StateLabel = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_-]{0,63}$")]
+ReasonCode = Annotated[str, StringConstraints(pattern=r"^[A-Z][A-Z0-9_]{0,127}$")]
 
 
 class ExecutionIntent(StrEnum):
@@ -40,6 +44,13 @@ class EvidenceLevel(StrEnum):
     OBSERVED = "observed"
     PEER_ASSERTED = "peer_asserted"
     HARDWARE_ATTESTED = "hardware_attested"
+
+
+_EXECUTION_SCOPE_RANK = {
+    ExecutionIntent.DEVICE_ONLY: 0,
+    ExecutionIntent.PRIVATE_MESH: 1,
+    ExecutionIntent.PUBLIC_MESH: 2,
+}
 
 
 class ContractModel(BaseModel):
@@ -133,6 +144,116 @@ class TopologySnapshot(ContractModel):
             raise ValueError("edges must be unique")
         if any(source not in known or target not in known for source, target in edge_pairs):
             raise ValueError("every edge endpoint must reference a peer in the snapshot")
+        return self
+
+
+class FabricCandidateObservation(ContractModel):
+    """One provider-reported candidate that carries no admission authority."""
+
+    SCHEMA_VERSION: ClassVar[str] = "locusmesh.fabric-candidate-observation.v1"
+
+    schema_version: str = SCHEMA_VERSION
+    provider: ProviderId
+    candidate_id: PeerId
+    local_node: bool
+    state: StateLabel
+    serving_models: tuple[ModelId, ...] = Field(default=(), max_length=256)
+    provider_claimed_owner_verified: bool
+    observed_scope: Literal[
+        ExecutionIntent.PRIVATE_MESH,
+        ExecutionIntent.PUBLIC_MESH,
+    ]
+    evidence_level: Literal[EvidenceLevel.OBSERVED] = EvidenceLevel.OBSERVED
+    admission_authority: Literal[False] = False
+    reason_codes: tuple[ReasonCode, ...] = (
+        "PROVIDER_STATUS_ONLY",
+        "REQUEST_BINDING_MISSING",
+        "POLICY_PIN_MISSING",
+    )
+
+    @model_validator(mode="after")
+    def _unique_models_and_reasons(self) -> FabricCandidateObservation:
+        if len(self.serving_models) != len(set(self.serving_models)):
+            raise ValueError("serving_models must be unique")
+        if len(self.reason_codes) != len(set(self.reason_codes)):
+            raise ValueError("reason_codes must be unique")
+        required_reasons = {
+            "PROVIDER_STATUS_ONLY",
+            "REQUEST_BINDING_MISSING",
+            "POLICY_PIN_MISSING",
+        }
+        if not required_reasons.issubset(self.reason_codes):
+            raise ValueError("observation-only candidates require boundary reason codes")
+        return self
+
+
+class FabricObservation(ContractModel):
+    """Bounded provider status projection, intentionally distinct from topology authority."""
+
+    SCHEMA_VERSION: ClassVar[str] = "locusmesh.fabric-observation.v1"
+
+    schema_version: str = SCHEMA_VERSION
+    provider: ProviderId
+    provider_version: str = Field(min_length=1, max_length=64)
+    provider_contract: str = Field(min_length=1, max_length=128)
+    source_endpoint: str = Field(min_length=1, max_length=512)
+    projection_digest: Digest
+    observed_at: datetime
+    expires_at: datetime
+    requested_max_scope: ExecutionIntent
+    observed_scope: Literal[
+        ExecutionIntent.PRIVATE_MESH,
+        ExecutionIntent.PUBLIC_MESH,
+    ]
+    within_requested_scope: bool
+    admission_authority: Literal[False] = False
+    candidates: tuple[FabricCandidateObservation, ...] = Field(min_length=1, max_length=256)
+    reason_codes: tuple[ReasonCode, ...]
+
+    @field_validator("observed_at", "expires_at")
+    @classmethod
+    def _timezone_required(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("timezone-aware datetime required")
+        return value
+
+    @model_validator(mode="after")
+    def _coherent_observation(self) -> FabricObservation:
+        if self.observed_at >= self.expires_at:
+            raise ValueError("observed_at must be earlier than expires_at")
+        if (self.expires_at - self.observed_at).total_seconds() > 60:
+            raise ValueError("observation lifetime cannot exceed 60 seconds")
+        candidate_ids = [candidate.candidate_id for candidate in self.candidates]
+        if len(candidate_ids) != len(set(candidate_ids)):
+            raise ValueError("candidates must contain unique candidate_id values")
+        if any(candidate.provider != self.provider for candidate in self.candidates):
+            raise ValueError("candidate provider must match observation provider")
+        if any(candidate.observed_scope != self.observed_scope for candidate in self.candidates):
+            raise ValueError("candidate scope must match the fabric observation")
+        if len(self.reason_codes) != len(set(self.reason_codes)):
+            raise ValueError("reason_codes must be unique")
+        expected_scope_reason = (
+            "SCOPE_SIGNAL_WITHIN_MAXIMUM"
+            if self.within_requested_scope
+            else "SCOPE_SIGNAL_EXCEEDS_MAXIMUM"
+        )
+        if expected_scope_reason not in self.reason_codes:
+            raise ValueError("reason_codes must explain the scope comparison")
+        expected_signal_reason = (
+            "PRIVATE_LAN_STATUS_SIGNAL"
+            if self.observed_scope is ExecutionIntent.PRIVATE_MESH
+            else "PUBLIC_OR_AMBIGUOUS_STATUS_SIGNAL"
+        )
+        if expected_signal_reason not in self.reason_codes:
+            raise ValueError("reason_codes must explain the provider scope signal")
+        actual_within_scope = (
+            _EXECUTION_SCOPE_RANK[self.observed_scope]
+            <= _EXECUTION_SCOPE_RANK[self.requested_max_scope]
+        )
+        if self.within_requested_scope != actual_within_scope:
+            raise ValueError("within_requested_scope must match the scope lattice")
+        if "OBSERVATION_ONLY" not in self.reason_codes:
+            raise ValueError("reason_codes must preserve the observation-only boundary")
         return self
 
 

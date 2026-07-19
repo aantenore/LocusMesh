@@ -73,6 +73,7 @@ jobs:
         run: |
           uv venv --python 3.12 /tmp/locusmesh-release
           uv pip install --python /tmp/locusmesh-release/bin/python dist/*.whl
+          uv run python scripts/smoke_installed_observer.py /tmp/locusmesh-release/bin/locusmesh
           cd /tmp
           /tmp/locusmesh-release/bin/locusmesh --json doctor
           /tmp/locusmesh-release/bin/locusmesh --json demo

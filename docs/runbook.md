@@ -1,9 +1,10 @@
-# LocusMesh `0.1` runbook
+# LocusMesh `0.2` runbook
 
 ## 1. Operating boundary
 
-LocusMesh is an offline CLI and Python library. The current commands:
+LocusMesh is a CLI and Python library. The current commands:
 
+- observe bounded candidate status from a loopback Mesh-LLM management API;
 - inspect a fixture topology;
 - evaluate a route plan against an operator-selected policy;
 - verify an existing signed route attestation;
@@ -11,17 +12,18 @@ LocusMesh is an offline CLI and Python library. The current commands:
 - run built-in positive and negative scenarios;
 - export public JSON Schemas.
 
-They do not call an inference provider, discover a live topology, reserve a
-route, or generate runtime proof. A successful decision describes the supplied
-artifacts at the verification time; it is not authorization for a later
-invocation.
+They do not call an inference provider, enroll an observed peer, reserve a
+route, or generate runtime proof. An observation is not a topology or admission.
+A successful decision describes the supplied artifacts at the verification
+time; it is not authorization for a later invocation.
 
 ## 2. Prerequisites
 
 - Python 3.12 or newer;
 - `uv`;
 - a local source checkout or installed package;
-- no network at runtime;
+- no network for admission, verification, fixture, demo, or schema commands;
+- a running loopback Mesh-LLM management API only for `observe mesh-llm`;
 - no credential or secret for admission/verification.
 
 From the repository:
@@ -32,8 +34,8 @@ uv run locusmesh --version
 uv run locusmesh --json doctor
 ```
 
-`doctor` should report `offline: true`, `network_required: false`, and
-`secret_required: false`.
+`doctor` should report `admission_offline: true`,
+`observation_network_required: true`, and `secret_required: false`.
 
 ## 3. Files and permissions
 
@@ -103,6 +105,7 @@ Always check the process exit code and the typed payload:
 | `2` | Invalid arguments, file, encoding, JSON/YAML, contract, or unavailable configured state. |
 | `3` | Route-plan policy denial. |
 | `4` | Attestation or replay denial. |
+| `5` | Provider scope signal exceeded the requested maximum; no admission was granted. |
 
 A handled internal failure returns a non-admission error envelope. A crash
 outside the CLI boundary produces no valid artifact. Treat either as denial
@@ -114,10 +117,43 @@ and never fall back to a saved admission.
 uv run locusmesh --json doctor
 ```
 
-This checks installed versions of the runtime dependencies. It does not check a
-network, inference server, key service, or live mesh.
+This checks installed versions of the runtime dependencies and reports the
+offline/live split. It does not contact a network, inference server, key
+service, or mesh.
 
-## 6. Inspect a fixture topology
+## 6. Observe Mesh-LLM candidates
+
+Start Mesh-LLM separately, then read only its loopback management status:
+
+```bash
+uv run locusmesh --json observe mesh-llm \
+  --management-url http://127.0.0.1:3131 \
+  --max-scope private_mesh
+```
+
+The origin must be loopback and must not include credentials, a path, query, or
+fragment. LocusMesh appends `/api/status`, denies redirects, and emits only a
+bounded projection. It never sends a prompt or calls the OpenAI-compatible
+inference endpoint.
+
+Inspect these fields:
+
+- `observed_scope`: conservative provider status signal;
+- `within_requested_scope`: whether that signal is no wider than
+  `--max-scope`;
+- `expires_at`: short observation lifetime;
+- `candidates`: local node and reported peers with serving models;
+- `admission_authority`: always `false` on both observation and candidates;
+- `reason_codes`: always includes `OBSERVATION_ONLY` and explains whether the
+  fabric signal was explicit private LAN or public/ambiguous.
+
+Exit `0` means only that the observation was acquired and its scope signal fit
+the requested maximum. Exit `5` means the signal was wider. Neither outcome
+admits a route. Do not convert the result into policy automatically; establish
+peer keys, edges, model/runtime digests, validity, and evidence floors through
+an independent operator process.
+
+## 7. Inspect a fixture topology
 
 ```bash
 uv run locusmesh --json probe \
@@ -136,7 +172,7 @@ The output contains:
 authority. Admission uses only the topology embedded in the policy selected by
 `--policy`.
 
-## 7. Evaluate a route plan
+## 8. Evaluate a route plan
 
 ```bash
 uv run locusmesh --json admit \
@@ -170,7 +206,7 @@ The command checks:
 The CLI evaluates against current UTC. Use the Python API with an explicit
 `now` for deterministic replay or audit.
 
-## 8. Verify a signed attestation
+## 9. Verify a signed attestation
 
 Stateless verification:
 
@@ -213,7 +249,7 @@ The SQLite database is a local replay domain. Multiple verifier instances must
 share the same durable store, or use a future external adapter, if they must
 share replay knowledge.
 
-## 9. Run the deterministic demo
+## 10. Run the deterministic demo
 
 ```bash
 uv run locusmesh --json demo
@@ -229,17 +265,19 @@ The demo runs entirely in memory and covers:
 
 Use it as a smoke test, not as proof that a real provider integration works.
 
-## 10. Export contract schemas
+## 11. Export contract schemas
 
 ```bash
 mkdir -p .local/schemas
 uv run locusmesh --json schema export --out .local/schemas
 ```
 
-The command writes ten sorted Pydantic JSON Schema files:
+The command writes twelve sorted Pydantic JSON Schema files:
 
 - `execution-intent.schema.json`;
 - `evidence-level.schema.json`;
+- `fabric-candidate-observation.schema.json`;
+- `fabric-observation.schema.json`;
 - `peer-manifest.schema.json`;
 - `topology-edge.schema.json`;
 - `topology-snapshot.schema.json`;
@@ -252,7 +290,7 @@ The command writes ten sorted Pydantic JSON Schema files:
 Schema export overwrites files with those names in the selected directory. Use
 a generated-artifact directory, not the policy input directory.
 
-## 11. Python API
+## 12. Python API
 
 ### Plan admission
 
@@ -306,7 +344,7 @@ if not decision.admitted:
 Use a fixed timezone-aware `now` in tests. Do not make application behavior
 depend on parsing human-readable CLI text.
 
-## 12. Interpret decisions
+## 13. Interpret decisions
 
 `decision_kind` distinguishes:
 
@@ -327,7 +365,7 @@ hardware evidence is impossible.
 For a denial, use exact `reason_codes`. Do not scrape stderr or match partial
 human messages.
 
-## 13. Common denial triage
+## 14. Common denial triage
 
 | Reason | Likely cause | Safe action |
 | --- | --- | --- |
@@ -343,10 +381,12 @@ human messages.
 | `RECEIPT_EVIDENCE_BELOW_FLOOR` | Receipt claim is weaker than policy. | Obtain appropriate evidence or deny. |
 | `REPLAY_DETECTED` | Nonce already exists in replay domain. | Reject and investigate; do not delete state merely to retry. |
 | `STATE_UNAVAILABLE` | Configured replay state cannot be opened or written. | Keep the request denied; restore the configured durable state before retrying. |
+| `SCOPE_SIGNAL_EXCEEDS_MAXIMUM` | Mesh status indicates a wider boundary than requested. | Exclude the candidates; do not widen scope automatically. |
+| `OBSERVATION_UNAVAILABLE` | Provider endpoint or projection failed. | Treat candidates as unavailable; restore the endpoint/contract before retrying. |
 
 Multiple reason codes may be returned for one malformed bundle.
 
-## 14. Verification and release checks
+## 15. Verification and release checks
 
 ```bash
 uv lock --check
@@ -364,10 +404,11 @@ uv run locusmesh --json demo
 ```
 
 For a network-denied release exercise, install dependencies first, disconnect
-network access, then run the test suite and all current CLI commands against
-local fixtures.
+network access, then run the test suite and all offline CLI commands against
+local fixtures. The test suite separately exercises the observer through a real
+loopback HTTP fixture without starting inference.
 
-## 15. Backup, recovery, and rotation
+## 16. Backup, recovery, and rotation
 
 ### Replay database
 
@@ -384,11 +425,11 @@ reviewed policy with new validity windows and key bindings, distribute it
 through deployment controls, and ensure callers select it. Receipts bound to a
 different policy digest will deny.
 
-Do not use `probe` output as an automatic key-enrollment mechanism.
+Do not use `probe` or `observe` output as an automatic key-enrollment mechanism.
 
-## 16. Escalation boundaries
+## 17. Escalation boundaries
 
-Stop and redesign before using `0.1` as a live enforcement gate if the
+Stop and redesign before using `0.2` as a live enforcement gate if the
 deployment requires:
 
 - fresh pre-invocation route authority;

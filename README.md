@@ -12,10 +12,11 @@
   scope, peer, key, model, runtime, time window, or evidence does not match.
 - **Who it is for:** developers and operators who need a small, inspectable trust
   boundary around local, private-mesh, or public-mesh inference routes.
-- **Concrete example:** the offline demo allows a one-device route and an
-  approved private-peer route. It rejects a supposedly device-only route whose
-  peer is classified as public even though that peer advertises a loopback
-  address; it also rejects a changed signature and a repeated nonce.
+- **Concrete example:** the live observer can list the nodes and models reported
+  by a local Mesh-LLM process without silently trusting them. It classifies the
+  mesh status against an explicit maximum scope, while the offline verifier
+  still requires separately pinned peers, keys, model/runtime digests, and
+  request-bound receipts before admitting a route.
 
 | Feature | Real-world benefit |
 | --- | --- |
@@ -24,24 +25,28 @@
 | One signed receipt per exact hop | Missing, reordered, or altered supplied route evidence is denied. |
 | Time, hop-count, digest, and evidence-level checks | Stale or structurally inconsistent routes fail closed instead of being accepted on best effort. |
 | Optional SQLite replay protection | A previously accepted nonce cannot be silently reused in the same protected store. |
-| Stable offline CLI and Python API | Teams can add the same route-admission check to scripts, tests, and applications without a hosted dependency. |
+| Read-only Mesh-LLM candidate observation | Operators can inspect a real fabric without turning provider status into trusted topology. |
+| Stable CLI and Python API | Teams can add the same route-admission check to scripts, tests, and applications without a hosted dependency. |
 
-> **Maturity and limits:** LocusMesh is an experimental offline alpha, not a
-> live mesh, model router, or inference service. It validates supplied artifacts
-> and signatures; it does not prove that a peer performed the claimed
-> computation or kept content confidential. Hardware-attested evidence is
-> reserved vocabulary and is not implemented in this release.
+> **Maturity and limits:** LocusMesh is an experimental alpha, not a mesh,
+> model router, or inference service. It can read a loopback Mesh-LLM status
+> endpoint, but that observation has `admission_authority=false` and never
+> becomes policy automatically. LocusMesh does not prove that a peer performed
+> the claimed computation or kept content confidential. Hardware-attested
+> evidence is reserved vocabulary and is not implemented in this release.
 
 ## Technical overview
 
 LocusMesh is a local-first, fail-closed Python library and CLI for evaluating
 distributed-inference execution scopes and verifying signed route evidence.
 
-It answers two bounded questions:
+It answers three bounded questions:
 
-1. Is an operator-pinned route plan admissible under `device_only`,
+1. Which candidates and scope signals does a local Mesh-LLM management endpoint
+   currently report, without granting those reports authority?
+2. Is an operator-pinned route plan admissible under `device_only`,
    `private_mesh`, or `public_mesh` policy?
-2. Does a route attestation contain one valid Ed25519-signed receipt for every
+3. Does a route attestation contain one valid Ed25519-signed receipt for every
    exact hop?
 
 It does not select a model, route a prompt, call an inference endpoint, or run
@@ -51,24 +56,29 @@ an agent.
 
 | Property | Status |
 | --- | --- |
-| Version | `0.1.0a1` |
+| Version | `0.2.0a1` |
 | Maturity | Experimental executable alpha; not production-ready |
-| Runtime mode | Offline vertical slice over supplied artifacts |
+| Runtime mode | Read-only live observation plus offline admission and verification |
 | License | [Apache-2.0](LICENSE) |
 
 The current release provides:
 
 - strict Pydantic contracts and deterministic JSON Schema export;
+- a loopback-only, bounded, redirect-denying Mesh-LLM status observer;
+- provider candidates whose type, reason codes, scope signal, five-second
+  default lifetime, and `admission_authority=false` boundary are explicit;
 - bounded JSON/YAML input with duplicate-key rejection;
 - pure route-plan admission with explicit verification time in the library;
 - direct Ed25519 signatures over compact, sorted-key UTF-8 JSON payloads;
 - full hop-chain, digest, key, scope, time, and evidence checks;
 - a strict local fixture topology adapter;
 - optional SQLite replay protection after successful verification;
-- an offline CLI, deterministic demo scenarios, and Python API.
+- a CLI, deterministic demo scenarios, and Python API.
 
-The CLI and library operate on supplied files and objects. They are not a fresh
-pre-invocation runtime attestor and do not enable a live mesh adapter.
+Admission and verification still operate on supplied files and objects. The
+observer performs no inference, reservation, policy mutation, or fresh
+pre-invocation attestation. Its output is deliberately not a
+`TopologySnapshot` and cannot authorize a route.
 
 ## Install for local development
 
@@ -86,6 +96,9 @@ Python 3.12 or newer is required.
 ```bash
 uv run locusmesh --json doctor
 uv run locusmesh --json probe --topology topology.json
+uv run locusmesh --json observe mesh-llm \
+  --management-url http://127.0.0.1:3131 \
+  --max-scope private_mesh
 uv run locusmesh --json admit --policy policy.yaml --plan plan.json
 uv run locusmesh --json verify \
   --policy policy.yaml \
@@ -105,6 +118,7 @@ uv run locusmesh --json schema export --out generated-schemas
 | `2` | Input, schema, file, decoding, or configured-state error. |
 | `3` | Route-plan policy denial. |
 | `4` | Attestation, signature, evidence, time, or replay denial. |
+| `5` | Provider scope signal exceeded `--max-scope`; no admission was granted. |
 
 JSON mode emits a stable `locusmesh.cli-output.v1` envelope on stdout.
 Handled internal failures use `INTERNAL_ERROR`, `ok=false`, and `data=null`
@@ -159,11 +173,15 @@ flowchart LR
     V["Pure receipt verification"]
     D["AdmissionDecision"]
     F["Fixture topology adapter"]
+    O["Mesh-LLM status observer<br/>observation only"]
+    C["Fabric candidate observations<br/>authority=false"]
     S["Optional SQLite replay store"]
 
     P --> B
     I --> B
     F --> M
+    O --> C
+    C -. "never auto-pins" .-> P
     B --> M
     M --> A
     M --> V
@@ -188,6 +206,7 @@ remain at adapter boundaries.
 | `io.py` | One-MiB bounded JSON/YAML parsing with duplicate-key rejection. |
 | `ports.py` | Provider-neutral topology, signer, and replay protocols. |
 | `adapters/fixture.py` | Strict local JSON topology source. |
+| `adapters/mesh_llm.py` | Bounded, loopback-only projection of Mesh-LLM status into non-authoritative candidates. |
 | `adapters/local_signer.py` | In-memory Ed25519 signer for fixtures and embedding. |
 | `replay.py` | Optional lazy SQLite nonce store. |
 | `schema_export.py` | Deterministic Pydantic JSON Schema export. |
@@ -197,6 +216,8 @@ remain at adapter boundaries.
 
 - `ExecutionIntent`
 - `EvidenceLevel`
+- `FabricCandidateObservation`
+- `FabricObservation`
 - `PeerManifest`
 - `TopologyEdge`
 - `TopologySnapshot`
@@ -210,8 +231,11 @@ remain at adapter boundaries.
 topology snapshot, `local_peer_id`, peer manifests, Ed25519 public keys,
 scope classifications, model/runtime digests, evidence floors, and hop limit.
 
-A provider observation does not become authority merely by matching this
-shape. An operator must pin and review the policy file used for admission.
+`FabricObservation` is intentionally a different wire type from
+`TopologySnapshot`. A provider observation does not become authority merely by
+matching identifiers or models. An operator must establish keys, model/runtime
+digests, edges, validity, and scope independently and pin the policy used for
+admission.
 
 ## Receipt binding
 
@@ -310,15 +334,17 @@ artifacts. It does not establish:
 - fresh pre-invocation admission;
 - IAM identity or online key revocation;
 - safety of a future OpenAI-compatible proxy;
+- truth of Mesh-LLM status, its full compute path, or the peer chosen for a
+  later request;
 - availability, latency, price, or answer quality.
 
 See the [threat model](docs/threat-model.md).
 
-## Out of scope for `v0.1`
+## Out of scope for `v0.2`
 
 - OpenAI-compatible proxy;
-- real Mesh-LLM adapter;
-- live topology discovery or reservation;
+- Mesh-LLM inference, reservation, policy enrollment, or request-bound receipt adapter;
+- authoritative live topology discovery;
 - IAM and secret-manager integration;
 - TEE verification;
 - proof of correct compute;
@@ -351,6 +377,7 @@ The release contract and mandatory cases are documented in
 
 - [Delivery contract](docs/delivery-contract.md)
 - [Admission/evidence boundary ADR](docs/adr/0001-admission-evidence-boundary.md)
+- [Read-only fabric observation ADR](docs/adr/0002-read-only-fabric-observation.md)
 - [Threat model](docs/threat-model.md)
 - [Runbook](docs/runbook.md)
 - [Primary-source market scan](docs/market-scan.md)

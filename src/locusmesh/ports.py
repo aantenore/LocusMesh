@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Protocol, runtime_checkable
 
-from locusmesh.models import TopologySnapshot
+from locusmesh.models import FabricObservation, TopologySnapshot
 
 
 @runtime_checkable
@@ -12,6 +13,13 @@ class TopologyProvider(Protocol):
     """Supply a bounded topology snapshot without granting trust."""
 
     def snapshot(self) -> TopologySnapshot: ...
+
+
+@runtime_checkable
+class FabricObserver(Protocol):
+    """Return a bounded provider observation that cannot grant admission."""
+
+    def observe(self, *, now: datetime) -> FabricObservation: ...
 
 
 @runtime_checkable

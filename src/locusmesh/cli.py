@@ -1,4 +1,4 @@
-"""Installable offline command-line interface for LocusMesh."""
+"""Installable command-line interface for observation and offline verification."""
 
 from __future__ import annotations
 
@@ -18,10 +18,11 @@ from yaml import YAMLError
 
 from locusmesh import __version__
 from locusmesh.adapters.fixture import FixtureTopologyProvider
+from locusmesh.adapters.mesh_llm import FabricObservationError, MeshLlmStatusObserver
 from locusmesh.attestation import verify_attestation
 from locusmesh.demo import run_demo
 from locusmesh.io import load_json_model, load_yaml_model
-from locusmesh.models import RouteAttestation, RoutePlan
+from locusmesh.models import ExecutionIntent, RouteAttestation, RoutePlan
 from locusmesh.policy import AdmissionPolicy, admit_plan, topology_digest
 from locusmesh.replay import SQLiteReplayStore
 from locusmesh.schema_export import export_schemas
@@ -37,7 +38,7 @@ class _Result:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="locusmesh",
-        description="Offline admission and signed route-evidence verification.",
+        description="Fabric observation, offline admission, and route-evidence verification.",
     )
     parser.add_argument("--json", action="store_true", help="emit stable JSON on stdout")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -47,6 +48,25 @@ def _parser() -> argparse.ArgumentParser:
 
     probe = commands.add_parser("probe", help="inspect a fixture topology JSON file")
     probe.add_argument("--topology", type=Path, required=True)
+
+    observe = commands.add_parser(
+        "observe",
+        help="read provider status into non-authoritative candidate observations",
+    )
+    observe_commands = observe.add_subparsers(dest="observe_command", required=True)
+    mesh_llm = observe_commands.add_parser(
+        "mesh-llm",
+        help="observe a loopback Mesh-LLM management endpoint",
+    )
+    mesh_llm.add_argument("--management-url", required=True)
+    mesh_llm.add_argument(
+        "--max-scope",
+        type=ExecutionIntent,
+        choices=tuple(ExecutionIntent),
+        required=True,
+    )
+    mesh_llm.add_argument("--timeout-seconds", type=float, default=2.0)
+    mesh_llm.add_argument("--ttl-seconds", type=int, default=5)
 
     admit = commands.add_parser("admit", help="evaluate a route plan against YAML policy")
     admit.add_argument("--policy", type=Path, required=True)
@@ -73,6 +93,8 @@ def _now() -> datetime:
 def _command_name(args: argparse.Namespace) -> str:
     if args.command == "schema":
         return f"schema {args.schema_command}"
+    if args.command == "observe":
+        return f"observe {args.observe_command}"
     return str(args.command)
 
 
@@ -87,8 +109,8 @@ def _run(args: argparse.Namespace) -> _Result:
             {
                 "version": __version__,
                 "python": ".".join(str(value) for value in sys.version_info[:3]),
-                "offline": True,
-                "network_required": False,
+                "admission_offline": True,
+                "observation_network_required": True,
                 "secret_required": False,
                 "dependencies": packages,
             },
@@ -115,6 +137,18 @@ def _run(args: argparse.Namespace) -> _Result:
                     for peer in topology.peers
                 ],
             },
+        )
+    if args.command == "observe" and args.observe_command == "mesh-llm":
+        observation = MeshLlmStatusObserver(
+            args.management_url,
+            requested_max_scope=args.max_scope,
+            timeout_seconds=args.timeout_seconds,
+            ttl_seconds=args.ttl_seconds,
+        ).observe(now=_now())
+        return _Result(
+            observation.within_requested_scope,
+            observation.model_dump(mode="json"),
+            0 if observation.within_requested_scope else 5,
         )
     if args.command == "admit":
         policy = load_yaml_model(args.policy, AdmissionPolicy)
@@ -210,6 +244,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 json.dumps(_error_envelope(command, "STATE_UNAVAILABLE", message), sort_keys=True)
             )
         return 2
+    except FabricObservationError:
+        message = "provider observation was unavailable or incompatible"
+        print(f"locusmesh: OBSERVATION_UNAVAILABLE: {message}", file=sys.stderr)
+        if args.json:
+            print(
+                json.dumps(
+                    _error_envelope(command, "OBSERVATION_UNAVAILABLE", message),
+                    sort_keys=True,
+                )
+            )
+        return 2
     except (OSError, ValueError) as exc:
         message = str(exc)
         print(f"locusmesh: INPUT_INVALID: {message}", file=sys.stderr)
@@ -229,6 +274,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         if result.ok:
             print(json.dumps(result.data, indent=2, sort_keys=True))
         else:
-            print("locusmesh: decision denied", file=sys.stderr)
+            print("locusmesh: operation did not satisfy its boundary", file=sys.stderr)
             print(json.dumps(result.data, indent=2, sort_keys=True))
     return result.exit_code

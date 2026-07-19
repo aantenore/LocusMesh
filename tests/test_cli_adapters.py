@@ -138,7 +138,8 @@ def test_cli_doctor_demo_admit_and_schema_export(
     output_dir = tmp_path / "schemas"
     assert cli.main(["--json", "schema", "export", "--out", str(output_dir)]) == 0
     exported = _json_stdout(capsys)
-    assert len(exported["data"]["files"]) == 10  # type: ignore[index]
+    assert len(exported["data"]["files"]) == 12  # type: ignore[index]
+    assert (output_dir / "fabric-observation.schema.json").exists()
     assert (output_dir / "route-attestation.schema.json").exists()
 
 
