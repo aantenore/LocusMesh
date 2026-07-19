@@ -1,0 +1,42 @@
+{
+  "schema_version": "locusmesh.topology-snapshot.v1",
+  "snapshot_id": "fixture-topology-v1",
+  "local_peer_id": "device-local",
+  "captured_at": "2025-01-01T00:00:00Z",
+  "expires_at": "2035-01-01T00:00:00Z",
+  "peers": [
+    {
+      "schema_version": "locusmesh.peer-manifest.v1",
+      "peer_id": "device-local",
+      "execution_scope": "device_only",
+      "model_digest": "sha256:40d2caaa0d7e58d68f53b0635fd66f37b4de2c8a2c61f79cb20f1636e721cc97",
+      "runtime_digest": "sha256:16182804ef45ae45c7ec7d35070ef86dd7241003ac3e0c0c319625d74870aedb",
+      "evidence_level": "peer_asserted",
+      "key_id": "ed25519:sha256:86108788bcf38b937a47624897aaf51145d79b629cffecb1719adc84b73ce178",
+      "public_key": "mANz0cOpMVvUMylJH0d5DMNxZXmVlZHmOd8hOitqTSY",
+      "valid_from": "2025-01-01T00:00:00Z",
+      "expires_at": "2035-01-01T00:00:00Z",
+      "address_hint": "local://device"
+    },
+    {
+      "schema_version": "locusmesh.peer-manifest.v1",
+      "peer_id": "private-peer",
+      "execution_scope": "private_mesh",
+      "model_digest": "sha256:40d2caaa0d7e58d68f53b0635fd66f37b4de2c8a2c61f79cb20f1636e721cc97",
+      "runtime_digest": "sha256:16182804ef45ae45c7ec7d35070ef86dd7241003ac3e0c0c319625d74870aedb",
+      "evidence_level": "peer_asserted",
+      "key_id": "ed25519:sha256:9630b9c201937cc33922a314048f12654a49f2037c69904c3ed3dc43a78785e0",
+      "public_key": "6oigtaSCM5iArqy7Y2t4Qct5Q451VY8dqSFWwAVm3Dk",
+      "valid_from": "2025-01-01T00:00:00Z",
+      "expires_at": "2035-01-01T00:00:00Z",
+      "address_hint": "fixture://private-peer"
+    }
+  ],
+  "edges": [
+    {
+      "schema_version": "locusmesh.topology-edge.v1",
+      "source_peer_id": "device-local",
+      "target_peer_id": "private-peer"
+    }
+  ]
+}

@@ -1,0 +1,151 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Verify and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          python-version: "3.12"
+          enable-cache: false
+          version: "0.11.21"
+      - name: Verify tagged commit belongs to main
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$GITHUB_SHA" "origin/main"
+      - run: uv sync --locked --all-groups
+      - name: Verify tag matches package version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          uv run python - <<'PY'
+          import os
+          import re
+          import tomllib
+          from pathlib import Path
+
+          version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+          match = re.fullmatch(r"(\d+\.\d+\.\d+)(a|b|rc)(\d+)", version)
+          if match:
+              stage = {"a": "alpha", "b": "beta", "rc": "rc"}[match.group(2)]
+              expected = f"v{match.group(1)}-{stage}.{match.group(3)}"
+          else:
+              expected = f"v{version}"
+          actual = os.environ["RELEASE_TAG"]
+          if actual != expected:
+              raise SystemExit(f"release tag {actual!r} does not match expected {expected!r}")
+          PY
+      - run: uv run ruff format --check .
+      - run: uv run ruff check .
+      - run: uv run mypy src tests
+      - run: uv run pytest
+      - run: >-
+          uv export --locked --all-groups --no-emit-project --no-hashes
+          --output-file /tmp/locusmesh-audit-requirements.txt
+      - run: >-
+          uv run pip-audit --strict
+          --requirement /tmp/locusmesh-audit-requirements.txt
+      - name: Build reproducible artifacts
+        run: |
+          export SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct)"
+          uv build --no-build-isolation
+          cd dist
+          sha256sum locusmesh-* > SHA256SUMS
+      - name: Smoke-test the wheel
+        run: |
+          uv venv --python 3.12 /tmp/locusmesh-release
+          uv pip install --python /tmp/locusmesh-release/bin/python dist/*.whl
+          cd /tmp
+          /tmp/locusmesh-release/bin/locusmesh --json doctor
+          /tmp/locusmesh-release/bin/locusmesh --json demo
+      - name: Upload verified artifacts
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: release-assets
+          path: |
+            dist/locusmesh-*.whl
+            dist/locusmesh-*.tar.gz
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 1
+
+  attest:
+    name: Attest verified artifacts
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      id-token: write # Mint the OIDC identity used for artifact provenance.
+      contents: read
+      attestations: write # Store provenance for the verified package artifacts.
+    steps:
+      - name: Download verified artifacts
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: release-assets
+          path: dist
+      - name: Verify artifact checksums
+        run: cd dist && sha256sum --check SHA256SUMS
+      - name: Attest package provenance
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: dist/locusmesh-*
+
+  release:
+    name: Publish verified artifacts
+    needs: [build, attest]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write # Create the GitHub release after all verification jobs pass.
+    steps:
+      - name: Download verified artifacts
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: release-assets
+          path: dist
+      - name: Verify artifact checksums
+        run: cd dist && sha256sum --check SHA256SUMS
+      - name: Verify tag still targets the built commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          kind="$(gh api "/repos/$GH_REPO/git/ref/tags/$GITHUB_REF_NAME" --jq .object.type)"
+          target="$(gh api "/repos/$GH_REPO/git/ref/tags/$GITHUB_REF_NAME" --jq .object.sha)"
+          if [ "$kind" = "tag" ]; then
+            target="$(gh api "/repos/$GH_REPO/git/tags/$target" --jq .object.sha)"
+          fi
+          test "$target" = "$GITHUB_SHA"
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          release_flags=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            release_flags+=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --generate-notes \
+            --verify-tag \
+            --title "$GITHUB_REF_NAME" \
+            "${release_flags[@]}"

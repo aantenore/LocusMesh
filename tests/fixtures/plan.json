@@ -1,0 +1,12 @@
+{
+  "schema_version": "locusmesh.route-plan.v1",
+  "request_id": "fixture-device-request",
+  "nonce": "fixture-nonce-0001",
+  "request_commitment": "hmac-sha256:ae18f3e4217aebf9a792cbd9310375710a511bb79968886bb012747a228aed3f",
+  "intent": "device_only",
+  "model_digest": "sha256:40d2caaa0d7e58d68f53b0635fd66f37b4de2c8a2c61f79cb20f1636e721cc97",
+  "runtime_digest": "sha256:16182804ef45ae45c7ec7d35070ef86dd7241003ac3e0c0c319625d74870aedb",
+  "hop_peer_ids": ["device-local"],
+  "created_at": "2025-01-01T00:00:00Z",
+  "expires_at": "2035-01-01T00:00:00Z"
+}
